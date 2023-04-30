@@ -90,9 +90,11 @@ func NewMethod(ctx context.Context, methodName string, options C.MethodOptions) 
 	if len(m.pskList) == 0 {
 		return nil, C.ErrMissingPassword
 	}
-	for _, key := range m.pskList {
-		if len(key) != m.keySaltLength {
-			return nil, E.New("bad key length, required ", m.keySaltLength, ", got ", len(options.Key))
+	for i, key := range m.pskList {
+		if len(key) < m.keySaltLength {
+			return nil, E.New("bad key length, required ", m.keySaltLength, ", got ", len(key))
+		} else if len(key) > m.keySaltLength {
+			m.pskList[i] = Key(key, m.keySaltLength)
 		}
 	}
 	if len(m.pskList) > 1 {
