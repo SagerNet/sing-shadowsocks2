@@ -92,7 +92,7 @@ func NewMethod(ctx context.Context, methodName string, options C.MethodOptions) 
 	}
 	for _, key := range m.pskList {
 		if len(key) != m.keySaltLength {
-			return nil, E.New("bad key length, required ", m.keySaltLength, ", got ", len(options.Key))
+			return nil, E.New("bad key length, required ", m.keySaltLength, ", got ", len(key))
 		}
 	}
 	if len(m.pskList) > 1 {
