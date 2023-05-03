@@ -287,7 +287,7 @@ func (c *clientPacketConn) ReadFrom(p []byte) (n int, addr net.Addr, err error) 
 	if err != nil {
 		return
 	}
-	packet, err := readCipher.Open(p[:0], rw.ZeroBytes[:readCipher.NonceSize()], p[c.method.keySaltLength:], nil)
+	packet, err := readCipher.Open(p[c.method.keySaltLength:c.method.keySaltLength], rw.ZeroBytes[:readCipher.NonceSize()], p[c.method.keySaltLength:], nil)
 	if err != nil {
 		return
 	}
