@@ -145,7 +145,9 @@ func (m *Method) DialEarlyConn(conn net.Conn, destination M.Socksaddr) net.Conn 
 
 func (m *Method) DialPacketConn(conn net.Conn) N.NetPacketConn {
 	return &clientPacketConn{
-		ExtendedConn: bufio.NewExtendedConn(conn),
+		AbstractConn: conn,
+		reader:       bufio.NewExtendedReader(conn),
+		writer:       bufio.NewExtendedWriter(conn),
 		method:       m,
 		session:      m.newUDPSession(),
 	}
@@ -367,7 +369,9 @@ func (c *clientConn) Close() error {
 }
 
 type clientPacketConn struct {
-	N.ExtendedConn
+	N.AbstractConn
+	reader  N.ExtendedReader
+	writer  N.ExtendedWriter
 	method  *Method
 	session *udpSession
 }
@@ -475,11 +479,11 @@ func (c *clientPacketConn) WritePacket(buffer *buf.Buffer, destination M.Socksad
 		buffer.Extend(shadowio.Overhead)
 		c.method.udpBlockEncryptCipher.Encrypt(packetHeader, packetHeader)
 	}
-	return c.ExtendedConn.WriteBuffer(buffer)
+	return c.writer.WriteBuffer(buffer)
 }
 
 func (c *clientPacketConn) ReadPacket(buffer *buf.Buffer) (destination M.Socksaddr, err error) {
-	err = c.ExtendedConn.ReadBuffer(buffer)
+	err = c.reader.ReadBuffer(buffer)
 	if err != nil {
 		return
 	}
@@ -611,7 +615,7 @@ func (c *clientPacketConn) readPacket(buffer *buf.Buffer) (destination M.Socksad
 }
 
 func (c *clientPacketConn) ReadFrom(p []byte) (n int, addr net.Addr, err error) {
-	n, err = c.ExtendedConn.Read(p)
+	n, err = c.reader.Read(p)
 	if err != nil {
 		return
 	}
@@ -710,7 +714,7 @@ func (c *clientPacketConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
 		buffer.Extend(shadowio.Overhead)
 		c.method.udpBlockEncryptCipher.Encrypt(packetHeader, packetHeader)
 	}
-	err = common.Error(c.ExtendedConn.Write(buffer.Bytes()))
+	err = common.Error(c.writer.Write(buffer.Bytes()))
 	if err != nil {
 		return
 	}
@@ -742,9 +746,9 @@ func (c *clientPacketConn) RearHeadroom() int {
 }
 
 func (c *clientPacketConn) Upstream() any {
-	return c.ExtendedConn
+	return c.AbstractConn
 }
 
 func (c *clientPacketConn) Close() error {
-	return common.Close(c.ExtendedConn)
+	return c.AbstractConn.Close()
 }

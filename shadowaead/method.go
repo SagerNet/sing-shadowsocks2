@@ -100,7 +100,9 @@ func (m *Method) DialEarlyConn(conn net.Conn, destination M.Socksaddr) net.Conn 
 
 func (m *Method) DialPacketConn(conn net.Conn) N.NetPacketConn {
 	return &clientPacketConn{
-		ExtendedConn: bufio.NewExtendedConn(conn),
+		AbstractConn: conn,
+		reader:       bufio.NewExtendedReader(conn),
+		writer:       bufio.NewExtendedWriter(conn),
 		method:       m,
 	}
 }
@@ -224,12 +226,16 @@ func (c *clientConn) WriterMTU() int {
 }
 
 type clientPacketConn struct {
-	N.ExtendedConn
+	N.AbstractConn
+	reader N.ExtendedReader
+	writer N.ExtendedWriter
 	method *Method
 }
 
 func (c *clientPacketConn) ReadPacket(buffer *buf.Buffer) (destination M.Socksaddr, err error) {
-	err = c.ExtendedConn.ReadBuffer(buffer)
+	println("read")
+	err = c.reader.ReadBuffer(buffer)
+	println("read done")
 	if err != nil {
 		return
 	}
@@ -268,11 +274,11 @@ func (c *clientPacketConn) WritePacket(buffer *buf.Buffer, destination M.Socksad
 	}
 	writeCipher.Seal(buffer.Index(c.method.keySaltLength), rw.ZeroBytes[:writeCipher.NonceSize()], buffer.From(c.method.keySaltLength), nil)
 	buffer.Extend(shadowio.Overhead)
-	return c.ExtendedConn.WriteBuffer(buffer)
+	return c.writer.WriteBuffer(buffer)
 }
 
 func (c *clientPacketConn) ReadFrom(p []byte) (n int, addr net.Addr, err error) {
-	n, err = c.ExtendedConn.Read(p)
+	n, err = c.reader.Read(p)
 	if err != nil {
 		return
 	}
@@ -321,7 +327,7 @@ func (c *clientPacketConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
 	}
 	writeCipher.Seal(buffer.Index(c.method.keySaltLength), rw.ZeroBytes[:writeCipher.NonceSize()], buffer.From(c.method.keySaltLength), nil)
 	buffer.Extend(shadowio.Overhead)
-	_, err = c.ExtendedConn.Write(buffer.Bytes())
+	_, err = c.writer.Write(buffer.Bytes())
 	if err != nil {
 		return
 	}
@@ -337,5 +343,5 @@ func (c *clientPacketConn) RearHeadroom() int {
 }
 
 func (c *clientPacketConn) Upstream() any {
-	return c.ExtendedConn
+	return c.AbstractConn
 }
