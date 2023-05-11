@@ -211,6 +211,8 @@ func (c *clientConn) Write(p []byte) (n int, err error) {
 			n = len(p)
 		}
 		return
+	} else {
+		c.writeStream.XORKeyStream(p, p)
 	}
 	return c.ExtendedConn.Write(p)
 }
