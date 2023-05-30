@@ -89,6 +89,7 @@ func (r *Reader) ReadBuffer(buffer *buf.Buffer) error {
 			} else {
 				n := copy(buffer.FreeBytes(), r.cache.Bytes())
 				if n > 0 {
+					buffer.Truncate(n)
 					r.cache.Advance(n)
 					return nil
 				}
