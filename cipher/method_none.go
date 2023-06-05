@@ -79,6 +79,7 @@ func (c *noneConn) WriteBuffer(buffer *buf.Buffer) error {
 	if !c.requestWritten {
 		header := buf.With(buffer.ExtendHeader(M.SocksaddrSerializer.AddrPortLen(c.destination)))
 		common.Must(M.SocksaddrSerializer.WriteAddrPort(header, c.destination))
+		c.requestWritten = true
 	}
 	return c.ExtendedConn.WriteBuffer(buffer)
 }
