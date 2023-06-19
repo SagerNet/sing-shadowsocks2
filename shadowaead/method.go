@@ -256,7 +256,11 @@ func (c *clientPacketConn) ReadPacket(buffer *buf.Buffer) (destination M.Socksad
 	if err != nil {
 		return
 	}
-	return M.SocksaddrSerializer.ReadAddrPort(buffer)
+	destination, err = M.SocksaddrSerializer.ReadAddrPort(buffer)
+	if err != nil {
+		return
+	}
+	return destination.Unwrap(), nil
 }
 
 func (c *clientPacketConn) WritePacket(buffer *buf.Buffer, destination M.Socksaddr) error {

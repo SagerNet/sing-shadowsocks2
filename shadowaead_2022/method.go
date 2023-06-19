@@ -611,7 +611,10 @@ func (c *clientPacketConn) readPacket(buffer *buf.Buffer) (destination M.Socksad
 	buffer.Advance(int(paddingLen))
 
 	destination, err = M.SocksaddrSerializer.ReadAddrPort(buffer)
-	return
+	if err != nil {
+		return
+	}
+	return destination.Unwrap(), nil
 }
 
 func (c *clientPacketConn) ReadFrom(p []byte) (n int, addr net.Addr, err error) {

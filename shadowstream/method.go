@@ -268,18 +268,22 @@ type clientPacketConn struct {
 	method *Method
 }
 
-func (c *clientPacketConn) ReadPacket(buffer *buf.Buffer) (M.Socksaddr, error) {
-	err := c.ReadBuffer(buffer)
+func (c *clientPacketConn) ReadPacket(buffer *buf.Buffer) (destination M.Socksaddr, err error) {
+	err = c.ReadBuffer(buffer)
 	if err != nil {
-		return M.Socksaddr{}, err
+		return
 	}
 	stream, err := c.method.decryptConstructor(c.method.key, buffer.To(c.method.saltLength))
 	if err != nil {
-		return M.Socksaddr{}, err
+		return
 	}
 	stream.XORKeyStream(buffer.From(c.method.saltLength), buffer.From(c.method.saltLength))
 	buffer.Advance(c.method.saltLength)
-	return M.SocksaddrSerializer.ReadAddrPort(buffer)
+	destination, err = M.SocksaddrSerializer.ReadAddrPort(buffer)
+	if err != nil {
+		return
+	}
+	return destination.Unwrap(), nil
 }
 
 func (c *clientPacketConn) WritePacket(buffer *buf.Buffer, destination M.Socksaddr) error {
