@@ -7,7 +7,6 @@ import (
 	"sync/atomic"
 
 	"github.com/sagernet/sing/common"
-	"github.com/sagernet/sing/common/buf"
 	E "github.com/sagernet/sing/common/exceptions"
 	"github.com/sagernet/sing/common/random"
 
@@ -44,10 +43,10 @@ func Key(key []byte, keyLength int) []byte {
 }
 
 func SessionKey(psk []byte, salt []byte, keyLength int) []byte {
-	sessionKey := buf.Make(len(psk) + len(salt))
+	sessionKey := make([]byte, len(psk)+len(salt))
 	copy(sessionKey, psk)
 	copy(sessionKey[len(psk):], salt)
-	outKey := buf.Make(keyLength)
+	outKey := make([]byte, keyLength)
 	blake3.DeriveKey(outKey, "shadowsocks 2022 session subkey", sessionKey)
 	return outKey
 }
