@@ -199,7 +199,10 @@ func (c *clientConn) Write(p []byte) (n int, err error) {
 		buffer := buf.NewSize(c.method.saltLength + M.SocksaddrSerializer.AddrPortLen(c.destination) + len(p))
 		defer buffer.Release()
 		buffer.WriteRandom(c.method.saltLength)
-		common.Must(M.SocksaddrSerializer.WriteAddrPort(buffer, c.destination))
+		err = M.SocksaddrSerializer.WriteAddrPort(buffer, c.destination)
+		if err != nil {
+			return
+		}
 		common.Must1(buffer.Write(p))
 		c.writeStream, err = c.method.encryptConstructor(c.method.key, buffer.To(c.method.saltLength))
 		if err != nil {
@@ -233,10 +236,12 @@ func (c *clientConn) ReadBuffer(buffer *buf.Buffer) error {
 
 func (c *clientConn) WriteBuffer(buffer *buf.Buffer) error {
 	if c.writeStream == nil {
-		var err error
 		header := buf.With(buffer.ExtendHeader(c.method.saltLength + M.SocksaddrSerializer.AddrPortLen(c.destination)))
 		header.WriteRandom(c.method.saltLength)
-		common.Must(M.SocksaddrSerializer.WriteAddrPort(header, c.destination))
+		err := M.SocksaddrSerializer.WriteAddrPort(header, c.destination)
+		if err != nil {
+			return err
+		}
 		c.writeStream, err = c.method.encryptConstructor(c.method.key, header.To(c.method.saltLength))
 		if err != nil {
 			return err
@@ -289,7 +294,10 @@ func (c *clientPacketConn) ReadPacket(buffer *buf.Buffer) (destination M.Socksad
 func (c *clientPacketConn) WritePacket(buffer *buf.Buffer, destination M.Socksaddr) error {
 	header := buf.With(buffer.ExtendHeader(c.method.saltLength + M.SocksaddrSerializer.AddrPortLen(destination)))
 	header.WriteRandom(c.method.saltLength)
-	common.Must(M.SocksaddrSerializer.WriteAddrPort(header, destination))
+	err := M.SocksaddrSerializer.WriteAddrPort(header, destination)
+	if err != nil {
+		return err
+	}
 	stream, err := c.method.encryptConstructor(c.method.key, buffer.To(c.method.saltLength))
 	if err != nil {
 		return err
@@ -327,7 +335,10 @@ func (c *clientPacketConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
 	buffer := buf.NewSize(c.method.saltLength + M.SocksaddrSerializer.AddrPortLen(destination) + len(p))
 	defer buffer.Release()
 	buffer.WriteRandom(c.method.saltLength)
-	common.Must(M.SocksaddrSerializer.WriteAddrPort(buffer, destination))
+	err = M.SocksaddrSerializer.WriteAddrPort(buffer, destination)
+	if err != nil {
+		return
+	}
 	stream, err := c.method.encryptConstructor(c.method.key, buffer.To(c.method.saltLength))
 	if err != nil {
 		return

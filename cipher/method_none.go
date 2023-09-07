@@ -62,7 +62,10 @@ func (c *noneConn) Write(p []byte) (n int, err error) {
 	if !c.requestWritten {
 		buffer := buf.NewSize(M.SocksaddrSerializer.AddrPortLen(c.destination) + len(p))
 		defer buffer.Release()
-		common.Must(M.SocksaddrSerializer.WriteAddrPort(buffer, c.destination))
+		err = M.SocksaddrSerializer.WriteAddrPort(buffer, c.destination)
+		if err != nil {
+			return
+		}
 		common.Must1(buffer.Write(p))
 		_, err = c.ExtendedConn.Write(buffer.Bytes())
 		if err != nil {
@@ -78,7 +81,10 @@ func (c *noneConn) Write(p []byte) (n int, err error) {
 func (c *noneConn) WriteBuffer(buffer *buf.Buffer) error {
 	if !c.requestWritten {
 		header := buf.With(buffer.ExtendHeader(M.SocksaddrSerializer.AddrPortLen(c.destination)))
-		common.Must(M.SocksaddrSerializer.WriteAddrPort(header, c.destination))
+		err := M.SocksaddrSerializer.WriteAddrPort(header, c.destination)
+		if err != nil {
+			return err
+		}
 		c.requestWritten = true
 	}
 	return c.ExtendedConn.WriteBuffer(buffer)
@@ -133,7 +139,10 @@ func (c *nonePacketConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
 	destination := M.SocksaddrFromNet(addr)
 	buffer := buf.NewSize(M.SocksaddrSerializer.AddrPortLen(destination) + len(p))
 	defer buffer.Release()
-	common.Must(M.SocksaddrSerializer.WriteAddrPort(buffer, destination))
+	err = M.SocksaddrSerializer.WriteAddrPort(buffer, destination)
+	if err != nil {
+		return
+	}
 	common.Must1(buffer.Write(p))
 	_, err = c.ExtendedConn.Write(buffer.Bytes())
 	if err != nil {
@@ -153,7 +162,10 @@ func (c *nonePacketConn) ReadPacket(buffer *buf.Buffer) (destination M.Socksaddr
 
 func (c *nonePacketConn) WritePacket(buffer *buf.Buffer, destination M.Socksaddr) error {
 	header := buf.With(buffer.ExtendHeader(M.SocksaddrSerializer.AddrPortLen(destination)))
-	common.Must(M.SocksaddrSerializer.WriteAddrPort(header, destination))
+	err := M.SocksaddrSerializer.WriteAddrPort(header, destination)
+	if err != nil {
+		return err
+	}
 	return c.ExtendedConn.WriteBuffer(buffer)
 }
 

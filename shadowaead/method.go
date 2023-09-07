@@ -266,7 +266,10 @@ func (c *clientPacketConn) ReadPacket(buffer *buf.Buffer) (destination M.Socksad
 func (c *clientPacketConn) WritePacket(buffer *buf.Buffer, destination M.Socksaddr) error {
 	header := buf.With(buffer.ExtendHeader(c.method.keySaltLength + M.SocksaddrSerializer.AddrPortLen(destination)))
 	header.WriteRandom(c.method.keySaltLength)
-	common.Must(M.SocksaddrSerializer.WriteAddrPort(header, destination))
+	err := M.SocksaddrSerializer.WriteAddrPort(header, destination)
+	if err != nil {
+		return err
+	}
 	key := buf.NewSize(c.method.keySaltLength)
 	legacykey.Kdf(c.method.key, header.To(c.method.keySaltLength), key.Extend(c.method.keySaltLength))
 	writeCipher, err := c.method.constructor(key.Bytes())
@@ -318,7 +321,10 @@ func (c *clientPacketConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
 	buffer := buf.NewSize(c.method.keySaltLength + M.SocksaddrSerializer.AddrPortLen(destination) + len(p) + shadowio.Overhead)
 	defer buffer.Release()
 	buffer.WriteRandom(c.method.keySaltLength)
-	common.Must(M.SocksaddrSerializer.WriteAddrPort(buffer, destination))
+	err = M.SocksaddrSerializer.WriteAddrPort(buffer, destination)
+	if err != nil {
+		return
+	}
 	common.Must1(buffer.Write(p))
 	key := buf.NewSize(c.method.keySaltLength)
 	legacykey.Kdf(c.method.key, buffer.To(c.method.keySaltLength), key.Extend(c.method.keySaltLength))
