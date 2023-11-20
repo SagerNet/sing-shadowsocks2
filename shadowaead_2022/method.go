@@ -79,7 +79,7 @@ func NewMethod(ctx context.Context, methodName string, options C.MethodOptions) 
 		m.constructor = aeadCipher(aes.NewCipher, cipher.NewGCM)
 		m.blockConstructor = aes.NewCipher
 	case "2022-blake3-chacha20-poly1305":
-		if len(options.KeyList) > 1 {
+		if len(m.pskList) > 1 {
 			return nil, ErrNoEIH
 		}
 		m.keySaltLength = 32
