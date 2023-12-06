@@ -39,9 +39,8 @@ func (m *noneMethod) DialEarlyConn(conn net.Conn, destination M.Socksaddr) net.C
 }
 
 func (m *noneMethod) DialPacketConn(conn net.Conn) N.NetPacketConn {
-	return &nonePacketConn{
-		ExtendedConn: bufio.NewExtendedConn(conn),
-	}
+	extendedConn := bufio.NewExtendedConn(conn)
+	return &nonePacketConn{extendedConn, extendedConn}
 }
 
 var (
@@ -113,11 +112,12 @@ var (
 )
 
 type nonePacketConn struct {
-	N.ExtendedConn
+	N.AbstractConn
+	conn N.ExtendedConn
 }
 
 func (c *nonePacketConn) ReadFrom(p []byte) (n int, addr net.Addr, err error) {
-	n, err = c.ExtendedConn.Read(p)
+	n, err = c.conn.Read(p)
 	if err != nil {
 		return
 	}
@@ -144,7 +144,7 @@ func (c *nonePacketConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
 		return
 	}
 	common.Must1(buffer.Write(p))
-	_, err = c.ExtendedConn.Write(buffer.Bytes())
+	_, err = c.conn.Write(buffer.Bytes())
 	if err != nil {
 		return
 	}
@@ -153,7 +153,7 @@ func (c *nonePacketConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
 }
 
 func (c *nonePacketConn) ReadPacket(buffer *buf.Buffer) (destination M.Socksaddr, err error) {
-	err = c.ExtendedConn.ReadBuffer(buffer)
+	err = c.conn.ReadBuffer(buffer)
 	if err != nil {
 		return
 	}
@@ -166,7 +166,7 @@ func (c *nonePacketConn) WritePacket(buffer *buf.Buffer, destination M.Socksaddr
 	if err != nil {
 		return err
 	}
-	return c.ExtendedConn.WriteBuffer(buffer)
+	return c.conn.WriteBuffer(buffer)
 }
 
 func (c *nonePacketConn) FrontHeadroom() int {
@@ -174,5 +174,5 @@ func (c *nonePacketConn) FrontHeadroom() int {
 }
 
 func (c *nonePacketConn) Upstream() any {
-	return c.ExtendedConn
+	return c.conn
 }

@@ -6,6 +6,7 @@ import (
 	"io"
 
 	"github.com/sagernet/sing/common/buf"
+	N "github.com/sagernet/sing/common/network"
 )
 
 const PacketLengthBufferSize = 2
@@ -17,11 +18,17 @@ const (
 	Overhead = 16
 )
 
+var (
+	_ N.ExtendedReader = (*Reader)(nil)
+	_ N.ReadWaiter     = (*Reader)(nil)
+)
+
 type Reader struct {
-	reader io.Reader
-	cipher cipher.AEAD
-	nonce  []byte
-	cache  *buf.Buffer
+	reader          io.Reader
+	cipher          cipher.AEAD
+	nonce           []byte
+	cache           *buf.Buffer
+	readWaitOptions N.ReadWaitOptions
 }
 
 func NewReader(upstream io.Reader, cipher cipher.AEAD) *Reader {
@@ -102,13 +109,45 @@ func (r *Reader) ReadBuffer(buffer *buf.Buffer) error {
 	}
 }
 
-func (r *Reader) ReadBufferThreadSafe() (buffer *buf.Buffer, err error) {
-	cache := r.cache
-	if cache != nil {
-		r.cache = nil
-		return cache, nil
+func (r *Reader) InitializeReadWaiter(options N.ReadWaitOptions) (needCopy bool) {
+	r.readWaitOptions = options
+	return options.NeedHeadroom()
+}
+
+func (r *Reader) WaitReadBuffer() (buffer *buf.Buffer, err error) {
+	if r.readWaitOptions.NeedHeadroom() {
+		for {
+			if r.cache != nil {
+				if r.cache.IsEmpty() {
+					r.cache.Release()
+					r.cache = nil
+				} else {
+					buffer = r.readWaitOptions.NewBuffer()
+					var n int
+					n, err = buffer.Write(r.cache.Bytes())
+					if err != nil {
+						buffer.Release()
+						return
+					}
+					buffer.Truncate(n)
+					r.cache.Advance(n)
+					r.readWaitOptions.PostReturn(buffer)
+					return
+				}
+			}
+			r.cache, err = r.readBuffer()
+			if err != nil {
+				return
+			}
+		}
+	} else {
+		cache := r.cache
+		if cache != nil {
+			r.cache = nil
+			return cache, nil
+		}
+		return r.readBuffer()
 	}
-	return r.readBuffer()
 }
 
 func (r *Reader) readBuffer() (*buf.Buffer, error) {
