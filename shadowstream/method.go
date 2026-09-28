@@ -278,6 +278,9 @@ func (c *clientPacketConn) ReadPacket(buffer *buf.Buffer) (destination M.Socksad
 	if err != nil {
 		return
 	}
+	if buffer.Len() < c.method.saltLength {
+		return M.Socksaddr{}, C.ErrPacketTooShort
+	}
 	stream, err := c.method.decryptConstructor(c.method.key, buffer.To(c.method.saltLength))
 	if err != nil {
 		return
@@ -310,6 +313,9 @@ func (c *clientPacketConn) ReadFrom(p []byte) (n int, addr net.Addr, err error) 
 	n, err = c.ExtendedConn.Read(p)
 	if err != nil {
 		return
+	}
+	if n < c.method.saltLength {
+		return 0, nil, C.ErrPacketTooShort
 	}
 	stream, err := c.method.decryptConstructor(c.method.key, p[:c.method.saltLength])
 	if err != nil {

@@ -529,7 +529,8 @@ func (c *clientPacketConn) readPacket(buffer *buf.Buffer) (destination M.Socksad
 			remoteCipher = c.session.remoteCipher
 		} else if sessionId == c.session.lastRemoteSessionId {
 			remoteCipher = c.session.lastRemoteCipher
-		} else {
+		}
+		if remoteCipher == nil {
 			key := SessionKey(c.method.pskList[len(c.method.pskList)-1], packetHeader[:8], c.method.keySaltLength)
 			remoteCipher, err = c.method.constructor(key)
 			if err != nil {
@@ -600,6 +601,9 @@ func (c *clientPacketConn) readPacket(buffer *buf.Buffer) (destination M.Socksad
 	if err != nil {
 		return M.Socksaddr{}, E.Cause(err, "read padding length")
 	}
+	if int(paddingLen) > buffer.Len() {
+		return M.Socksaddr{}, C.ErrPacketTooShort
+	}
 	buffer.Advance(int(paddingLen))
 
 	destination, err = M.SocksaddrSerializer.ReadAddrPort(buffer)
@@ -616,6 +620,9 @@ func (c *clientPacketConn) ReadFrom(p []byte) (n int, addr net.Addr, err error) 
 	}
 	buffer := buf.As(p[:n])
 	destination, err := c.readPacket(buffer)
+	if err != nil {
+		return 0, nil, err
+	}
 	if destination.IsFqdn() {
 		addr = destination
 	} else {
