@@ -9,7 +9,6 @@ import (
 	C "github.com/sagernet/sing-shadowsocks2/cipher"
 	"github.com/sagernet/sing-shadowsocks2/internal/legacykey"
 	"github.com/sagernet/sing-shadowsocks2/internal/shadowio"
-	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/buf"
 	"github.com/sagernet/sing/common/bufio"
 	E "github.com/sagernet/sing/common/exceptions"
@@ -99,12 +98,12 @@ func (m *Method) DialEarlyConn(conn net.Conn, destination M.Socksaddr) net.Conn 
 }
 
 func (m *Method) DialPacketConn(conn net.Conn) N.NetPacketConn {
-	return &clientPacketConn{
+	return bufio.NewNetPacketConn(&clientPacketConn{
 		AbstractConn: conn,
 		reader:       bufio.NewExtendedReader(conn),
 		writer:       bufio.NewExtendedWriter(conn),
 		method:       m,
-	}
+	})
 }
 
 var _ N.ExtendedConn = (*clientConn)(nil)
@@ -228,11 +227,18 @@ type clientPacketConn struct {
 }
 
 func (c *clientPacketConn) ReadPacket(buffer *buf.Buffer) (destination M.Socksaddr, err error) {
-	err = c.reader.ReadBuffer(buffer)
-	if err != nil {
-		return
+	start := buffer.Start()
+	for {
+		err = c.reader.ReadBuffer(buffer)
+		if err != nil {
+			return
+		}
+		destination, err = c.readPacket(buffer)
+		if err == nil {
+			return
+		}
+		buffer.Resize(start, 0)
 	}
-	return c.readPacket(buffer)
 }
 
 func (c *clientPacketConn) readPacket(buffer *buf.Buffer) (destination M.Socksaddr, err error) {
@@ -279,66 +285,6 @@ func (c *clientPacketConn) WritePacket(buffer *buf.Buffer, destination M.Socksad
 	writeCipher.Seal(buffer.Index(c.method.keySaltLength), rw.ZeroBytes[:writeCipher.NonceSize()], buffer.From(c.method.keySaltLength), nil)
 	buffer.Extend(shadowio.Overhead)
 	return c.writer.WriteBuffer(buffer)
-}
-
-func (c *clientPacketConn) ReadFrom(p []byte) (n int, addr net.Addr, err error) {
-	n, err = c.reader.Read(p)
-	if err != nil {
-		return
-	}
-	if n < c.method.keySaltLength {
-		err = C.ErrPacketTooShort
-		return
-	}
-	key := buf.NewSize(c.method.keySaltLength)
-	legacykey.Kdf(c.method.key, p[:c.method.keySaltLength], key.Extend(c.method.keySaltLength))
-	readCipher, err := c.method.constructor(key.Bytes())
-	key.Release()
-	if err != nil {
-		return
-	}
-	packet, err := readCipher.Open(p[c.method.keySaltLength:c.method.keySaltLength], rw.ZeroBytes[:readCipher.NonceSize()], p[c.method.keySaltLength:n], nil)
-	if err != nil {
-		return
-	}
-	packetContent := buf.As(packet)
-	destination, err := M.SocksaddrSerializer.ReadAddrPort(packetContent)
-	if err != nil {
-		return
-	}
-	if !destination.IsFqdn() {
-		addr = destination.UDPAddr()
-	} else {
-		addr = destination
-	}
-	n = copy(p, packetContent.Bytes())
-	return
-}
-
-func (c *clientPacketConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
-	destination := M.SocksaddrFromNet(addr)
-	buffer := buf.NewSize(c.method.keySaltLength + M.SocksaddrSerializer.AddrPortLen(destination) + len(p) + shadowio.Overhead)
-	defer buffer.Release()
-	buffer.WriteRandom(c.method.keySaltLength)
-	err = M.SocksaddrSerializer.WriteAddrPort(buffer, destination)
-	if err != nil {
-		return
-	}
-	common.Must1(buffer.Write(p))
-	key := buf.NewSize(c.method.keySaltLength)
-	legacykey.Kdf(c.method.key, buffer.To(c.method.keySaltLength), key.Extend(c.method.keySaltLength))
-	writeCipher, err := c.method.constructor(key.Bytes())
-	key.Release()
-	if err != nil {
-		return
-	}
-	writeCipher.Seal(buffer.Index(c.method.keySaltLength), rw.ZeroBytes[:writeCipher.NonceSize()], buffer.From(c.method.keySaltLength), nil)
-	buffer.Extend(shadowio.Overhead)
-	_, err = c.writer.Write(buffer.Bytes())
-	if err != nil {
-		return
-	}
-	return len(p), nil
 }
 
 func (c *clientPacketConn) FrontHeadroom() int {

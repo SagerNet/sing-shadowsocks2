@@ -40,7 +40,7 @@ func (m *noneMethod) DialEarlyConn(conn net.Conn, destination M.Socksaddr) net.C
 
 func (m *noneMethod) DialPacketConn(conn net.Conn) N.NetPacketConn {
 	extendedConn := bufio.NewExtendedConn(conn)
-	return &nonePacketConn{extendedConn, extendedConn}
+	return bufio.NewNetPacketConn(&nonePacketConn{extendedConn, extendedConn})
 }
 
 var (
@@ -106,7 +106,7 @@ func (c *noneConn) Upstream() any {
 }
 
 var (
-	_ N.NetPacketConn     = (*nonePacketConn)(nil)
+	_ N.PacketConn        = (*nonePacketConn)(nil)
 	_ N.FrontHeadroom     = (*nonePacketConn)(nil)
 	_ common.WithUpstream = (*nonePacketConn)(nil)
 )
@@ -116,48 +116,19 @@ type nonePacketConn struct {
 	conn N.ExtendedConn
 }
 
-func (c *nonePacketConn) ReadFrom(p []byte) (n int, addr net.Addr, err error) {
-	n, err = c.conn.Read(p)
-	if err != nil {
-		return
-	}
-	buffer := buf.As(p[:n])
-	destination, err := M.SocksaddrSerializer.ReadAddrPort(buffer)
-	if err != nil {
-		return
-	}
-	if destination.IsFqdn() {
-		addr = destination
-	} else {
-		addr = destination.UDPAddr()
-	}
-	n = copy(p, buffer.Bytes())
-	return
-}
-
-func (c *nonePacketConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
-	destination := M.SocksaddrFromNet(addr)
-	buffer := buf.NewSize(M.SocksaddrSerializer.AddrPortLen(destination) + len(p))
-	defer buffer.Release()
-	err = M.SocksaddrSerializer.WriteAddrPort(buffer, destination)
-	if err != nil {
-		return
-	}
-	common.Must1(buffer.Write(p))
-	_, err = c.conn.Write(buffer.Bytes())
-	if err != nil {
-		return
-	}
-	n = len(p)
-	return
-}
-
 func (c *nonePacketConn) ReadPacket(buffer *buf.Buffer) (destination M.Socksaddr, err error) {
-	err = c.conn.ReadBuffer(buffer)
-	if err != nil {
-		return
+	start := buffer.Start()
+	for {
+		err = c.conn.ReadBuffer(buffer)
+		if err != nil {
+			return
+		}
+		destination, err = M.SocksaddrSerializer.ReadAddrPort(buffer)
+		if err == nil {
+			return
+		}
+		buffer.Resize(start, 0)
 	}
-	return M.SocksaddrSerializer.ReadAddrPort(buffer)
 }
 
 func (c *nonePacketConn) WritePacket(buffer *buf.Buffer, destination M.Socksaddr) error {

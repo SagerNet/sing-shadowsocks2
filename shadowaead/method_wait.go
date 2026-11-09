@@ -49,14 +49,15 @@ func (w *clientPacketReadWaiter) InitializeReadWaiter(options N.ReadWaitOptions)
 }
 
 func (w *clientPacketReadWaiter) WaitReadPacket() (buffer *buf.Buffer, destination M.Socksaddr, err error) {
-	buffer, err = w.readWaiter.WaitReadBuffer()
-	if err != nil {
-		return
-	}
-	destination, err = w.readPacket(buffer)
-	if err != nil {
+	for {
+		buffer, err = w.readWaiter.WaitReadBuffer()
+		if err != nil {
+			return
+		}
+		destination, err = w.readPacket(buffer)
+		if err == nil {
+			return
+		}
 		buffer.Release()
-		return nil, M.Socksaddr{}, err
 	}
-	return
 }
