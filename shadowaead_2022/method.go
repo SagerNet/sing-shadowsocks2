@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/binary"
+	"errors"
 	"math"
 	mRand "math/rand"
 	"net"
@@ -144,13 +145,13 @@ func (m *Method) DialEarlyConn(conn net.Conn, destination M.Socksaddr) net.Conn 
 }
 
 func (m *Method) DialPacketConn(conn net.Conn) N.NetPacketConn {
-	return &clientPacketConn{
+	return bufio.NewNetPacketConn(&clientPacketConn{
 		AbstractConn: conn,
 		reader:       bufio.NewExtendedReader(conn),
 		writer:       bufio.NewExtendedWriter(conn),
 		method:       m,
 		session:      m.newUDPSession(),
-	}
+	})
 }
 
 func (m *Method) time() time.Time {
@@ -476,11 +477,18 @@ func (c *clientPacketConn) WritePacket(buffer *buf.Buffer, destination M.Socksad
 }
 
 func (c *clientPacketConn) ReadPacket(buffer *buf.Buffer) (destination M.Socksaddr, err error) {
-	err = c.reader.ReadBuffer(buffer)
-	if err != nil {
-		return
+	start := buffer.Start()
+	for {
+		err = c.reader.ReadBuffer(buffer)
+		if err != nil {
+			return
+		}
+		destination, err = c.readPacket(buffer)
+		if err == nil || errors.Is(err, ErrTooManyServerSessions) {
+			return
+		}
+		buffer.Resize(start, 0)
 	}
-	return c.readPacket(buffer)
 }
 
 func (c *clientPacketConn) readPacket(buffer *buf.Buffer) (destination M.Socksaddr, err error) {
@@ -564,28 +572,6 @@ func (c *clientPacketConn) readPacket(buffer *buf.Buffer) (destination M.Socksad
 		return M.Socksaddr{}, E.Extend(ErrBadTimestamp, "received ", epoch, ", diff ", diff, "s")
 	}
 
-	if sessionId == c.session.remoteSessionId {
-		c.session.window.Add(packetId)
-	} else if sessionId == c.session.lastRemoteSessionId {
-		c.session.lastWindow.Add(packetId)
-		c.session.lastRemoteSeen = c.method.time().Unix()
-	} else {
-		if c.session.remoteSessionId != 0 {
-			if c.method.time().Unix()-c.session.lastRemoteSeen < 60 {
-				return M.Socksaddr{}, ErrTooManyServerSessions
-			} else {
-				c.session.lastRemoteSessionId = c.session.remoteSessionId
-				c.session.lastWindow = c.session.window
-				c.session.lastRemoteSeen = c.method.time().Unix()
-				c.session.lastRemoteCipher = c.session.remoteCipher
-				c.session.window = SlidingWindow{}
-			}
-		}
-		c.session.remoteSessionId = sessionId
-		c.session.remoteCipher = remoteCipher
-		c.session.window.Add(packetId)
-	}
-
 	var clientSessionId uint64
 	err = binary.Read(buffer, binary.BigEndian, &clientSessionId)
 	if err != nil {
@@ -610,117 +596,29 @@ func (c *clientPacketConn) readPacket(buffer *buf.Buffer) (destination M.Socksad
 	if err != nil {
 		return
 	}
+
+	if sessionId == c.session.remoteSessionId {
+		c.session.window.Add(packetId)
+	} else if sessionId == c.session.lastRemoteSessionId {
+		c.session.lastWindow.Add(packetId)
+		c.session.lastRemoteSeen = c.method.time().Unix()
+	} else {
+		if c.session.remoteSessionId != 0 {
+			if c.method.time().Unix()-c.session.lastRemoteSeen < 60 {
+				return M.Socksaddr{}, ErrTooManyServerSessions
+			} else {
+				c.session.lastRemoteSessionId = c.session.remoteSessionId
+				c.session.lastWindow = c.session.window
+				c.session.lastRemoteSeen = c.method.time().Unix()
+				c.session.lastRemoteCipher = c.session.remoteCipher
+				c.session.window = SlidingWindow{}
+			}
+		}
+		c.session.remoteSessionId = sessionId
+		c.session.remoteCipher = remoteCipher
+		c.session.window.Add(packetId)
+	}
 	return destination.Unwrap(), nil
-}
-
-func (c *clientPacketConn) ReadFrom(p []byte) (n int, addr net.Addr, err error) {
-	n, err = c.reader.Read(p)
-	if err != nil {
-		return
-	}
-	buffer := buf.As(p[:n])
-	destination, err := c.readPacket(buffer)
-	if err != nil {
-		return 0, nil, err
-	}
-	if destination.IsFqdn() {
-		addr = destination
-	} else {
-		addr = destination.UDPAddr()
-	}
-	n = copy(p, buffer.Bytes())
-	return
-}
-
-func (c *clientPacketConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
-	destination := M.SocksaddrFromNet(addr)
-	var overHead int
-	if c.method.udpCipher != nil {
-		overHead = PacketNonceSize + shadowio.Overhead
-	} else {
-		overHead = shadowio.Overhead
-	}
-	overHead += 16 // packet header
-	pskLen := len(c.method.pskList)
-	if c.method.udpCipher == nil && pskLen > 1 {
-		overHead += (pskLen - 1) * aes.BlockSize
-	}
-	var paddingLen int
-	if destination.Port == 53 && len(p) < MaxPaddingLength {
-		paddingLen = mRand.Intn(MaxPaddingLength-len(p)) + 1
-	}
-	overHead += 1 // header type
-	overHead += 8 // timestamp
-	overHead += 2 // padding length
-	overHead += paddingLen
-	overHead += M.SocksaddrSerializer.AddrPortLen(destination)
-
-	buffer := buf.NewSize(overHead + len(p))
-	defer buffer.Release()
-
-	var dataIndex int
-	if c.method.udpCipher != nil {
-		common.Must1(buffer.ReadFullFrom(c.session.rng, PacketNonceSize))
-		if pskLen > 1 {
-			panic("unsupported chacha extended header")
-		}
-		dataIndex = PacketNonceSize
-	} else {
-		dataIndex = aes.BlockSize
-	}
-
-	common.Must(
-		binary.Write(buffer, binary.BigEndian, c.session.sessionId),
-		binary.Write(buffer, binary.BigEndian, c.session.nextPacketId()),
-	)
-
-	if c.method.udpCipher == nil && pskLen > 1 {
-		for i, psk := range c.method.pskList {
-			dataIndex += aes.BlockSize
-			pskHash := c.method.pskHash[aes.BlockSize*i : aes.BlockSize*(i+1)]
-
-			identityHeader := buffer.Extend(aes.BlockSize)
-			xorWords(identityHeader, pskHash, buffer.To(aes.BlockSize))
-			b, err := c.method.blockConstructor(psk)
-			if err != nil {
-				return 0, err
-			}
-			b.Encrypt(identityHeader, identityHeader)
-
-			if i == pskLen-2 {
-				break
-			}
-		}
-	}
-	common.Must(
-		buffer.WriteByte(HeaderTypeClient),
-		binary.Write(buffer, binary.BigEndian, uint64(c.method.time().Unix())),
-		binary.Write(buffer, binary.BigEndian, uint16(paddingLen)), // padding length
-	)
-
-	if paddingLen > 0 {
-		buffer.Extend(paddingLen)
-	}
-
-	err = M.SocksaddrSerializer.WriteAddrPort(buffer, destination)
-	if err != nil {
-		return
-	}
-	common.Must1(buffer.Write(p))
-	if c.method.udpCipher != nil {
-		c.method.udpCipher.Seal(buffer.Index(dataIndex), buffer.To(dataIndex), buffer.From(dataIndex), nil)
-		buffer.Extend(shadowio.Overhead)
-	} else {
-		packetHeader := buffer.To(aes.BlockSize)
-		c.session.cipher.Seal(buffer.Index(dataIndex), packetHeader[4:16], buffer.From(dataIndex), nil)
-		buffer.Extend(shadowio.Overhead)
-		c.method.udpBlockEncryptCipher.Encrypt(packetHeader, packetHeader)
-	}
-	err = common.Error(c.writer.Write(buffer.Bytes()))
-	if err != nil {
-		return
-	}
-	return len(p), nil
 }
 
 func (c *clientPacketConn) FrontHeadroom() int {
